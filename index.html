@@ -77,112 +77,64 @@
       const overlay = document.getElementById('tap-overlay');
       let started = false;
 
-      // ── Audio crossfader ──────────────────────────────────────────────────
-      let audioCtx = null;
-      let audioBuffer = null;
-      let activeSource = null;
-      let activeGain = null;
-      let trackDuration = 0;
-      let crossfadeTimer = null;
+      // Two <audio> elements — Safari plays these reliably when .play() is
+      // called directly inside a user gesture handler.
+      const tracks = [new Audio(AUDIO_SRC), new Audio(AUDIO_SRC)];
+      tracks.forEach(function (t) { t.preload = 'auto'; });
 
-      function createSource() {
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.loop = false;
+      let current = 0;
+      let fadeTimer = null;
+      let fadeInterval = null;
 
-        const gain = audioCtx.createGain();
-        gain.gain.setValueAtTime(0, audioCtx.currentTime);
-
-        source.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        return { source, gain };
+      function scheduleNextCrossfade() {
+        var track = tracks[current];
+        var delay = (track.duration - CROSSFADE_DURATION - track.currentTime) * 1000;
+        clearTimeout(fadeTimer);
+        fadeTimer = setTimeout(doCrossfade, Math.max(0, delay));
       }
 
-      function fadeIn(gain, duration) {
-        const now = audioCtx.currentTime;
-        gain.gain.cancelScheduledValues(now);
-        gain.gain.setValueAtTime(gain.gain.value, now);
-        gain.gain.linearRampToValueAtTime(1, now + duration);
-      }
+      function doCrossfade() {
+        var outTrack = tracks[current];
+        var nextIdx = current ^ 1;
+        var inTrack = tracks[nextIdx];
 
-      function fadeOut(gain, duration) {
-        const now = audioCtx.currentTime;
-        gain.gain.cancelScheduledValues(now);
-        gain.gain.setValueAtTime(gain.gain.value, now);
-        gain.gain.linearRampToValueAtTime(0, now + duration);
-      }
+        inTrack.volume = 0;
+        inTrack.currentTime = 0;
+        inTrack.play();
 
-      function startLoop() {
-        const { source, gain } = createSource();
-        fadeIn(gain, 0.3);
-        source.start(audioCtx.currentTime);
+        var startTime = Date.now();
+        clearInterval(fadeInterval);
+        fadeInterval = setInterval(function () {
+          var progress = Math.min((Date.now() - startTime) / (CROSSFADE_DURATION * 1000), 1);
+          outTrack.volume = 1 - progress;
+          inTrack.volume = progress;
 
-        activeSource = source;
-        activeGain = gain;
-
-        // Schedule next crossfade to begin CROSSFADE_DURATION seconds before track ends
-        const crossfadeStart = trackDuration - CROSSFADE_DURATION;
-        const delay = Math.max(0, crossfadeStart) * 1000;
-
-        crossfadeTimer = setTimeout(crossfade, delay);
-      }
-
-      function crossfade() {
-        // Fade out the current source
-        fadeOut(activeGain, CROSSFADE_DURATION);
-
-        const oldSource = activeSource;
-        const oldGain = activeGain;
-
-        // Start new source immediately and fade it in
-        const { source: newSource, gain: newGain } = createSource();
-        fadeIn(newGain, CROSSFADE_DURATION);
-        newSource.start(audioCtx.currentTime);
-
-        activeSource = newSource;
-        activeGain = newGain;
-
-        // Clean up old source after fade completes
-        setTimeout(function () {
-          try { oldSource.stop(); } catch (e) {}
-          oldGain.disconnect();
-        }, CROSSFADE_DURATION * 1000 + 200);
-
-        // Schedule the next crossfade
-        const delay = Math.max(0, trackDuration - CROSSFADE_DURATION) * 1000;
-        crossfadeTimer = setTimeout(crossfade, delay);
-      }
-
-      function loadAndStart() {
-        fetch(AUDIO_SRC)
-          .then(function (r) { return r.arrayBuffer(); })
-          .then(function (arrayBuffer) {
-            return new Promise(function (resolve, reject) {
-              audioCtx.decodeAudioData(arrayBuffer, resolve, reject);
-            });
-          })
-          .then(function (buffer) {
-            audioBuffer = buffer;
-            trackDuration = audioBuffer.duration;
-            startLoop();
-          })
-          .catch(function (err) {
-            console.error('Audio init failed:', err);
-          });
+          if (progress >= 1) {
+            clearInterval(fadeInterval);
+            outTrack.pause();
+            current = nextIdx;
+            scheduleNextCrossfade();
+          }
+        }, 50);
       }
 
       // ── Start on first interaction ────────────────────────────────────────
-      function handleStart(e) {
+      function handleStart() {
         if (started) return;
         started = true;
 
-        // AudioContext must be created synchronously inside the gesture handler for Safari
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        audioCtx.resume();
-
         overlay.classList.add('hidden');
-        loadAndStart();
+
+        var track = tracks[current];
+        track.volume = 1;
+        // .play() called synchronously inside gesture handler — required by Safari
+        track.play().catch(function (e) { console.error('play error:', e); });
+
+        if (track.duration) {
+          scheduleNextCrossfade();
+        } else {
+          track.addEventListener('loadedmetadata', scheduleNextCrossfade, { once: true });
+        }
 
         ['click', 'touchstart', 'keydown'].forEach(function (type) {
           document.removeEventListener(type, handleStart);

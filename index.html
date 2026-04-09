@@ -156,6 +156,7 @@
 
       async function initAudio() {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        await audioCtx.resume();
 
         const response = await fetch(AUDIO_SRC);
         const arrayBuffer = await response.arrayBuffer();

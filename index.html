@@ -115,7 +115,7 @@
 
       function startLoop() {
         const { source, gain } = createSource();
-        fadeIn(gain, CROSSFADE_DURATION);
+        fadeIn(gain, 0.3);
         source.start(audioCtx.currentTime);
 
         activeSource = source;
@@ -154,16 +154,22 @@
         crossfadeTimer = setTimeout(crossfade, delay);
       }
 
-      async function initAudio() {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        await audioCtx.resume();
-
-        const response = await fetch(AUDIO_SRC);
-        const arrayBuffer = await response.arrayBuffer();
-        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        trackDuration = audioBuffer.duration;
-
-        startLoop();
+      function loadAndStart() {
+        fetch(AUDIO_SRC)
+          .then(function (r) { return r.arrayBuffer(); })
+          .then(function (arrayBuffer) {
+            return new Promise(function (resolve, reject) {
+              audioCtx.decodeAudioData(arrayBuffer, resolve, reject);
+            });
+          })
+          .then(function (buffer) {
+            audioBuffer = buffer;
+            trackDuration = audioBuffer.duration;
+            startLoop();
+          })
+          .catch(function (err) {
+            console.error('Audio init failed:', err);
+          });
       }
 
       // ── Start on first interaction ────────────────────────────────────────
@@ -171,13 +177,13 @@
         if (started) return;
         started = true;
 
+        // AudioContext must be created synchronously inside the gesture handler for Safari
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx.resume();
+
         overlay.classList.add('hidden');
+        loadAndStart();
 
-        initAudio().catch(function (err) {
-          console.error('Audio init failed:', err);
-        });
-
-        // Remove all listeners once started
         ['click', 'touchstart', 'keydown'].forEach(function (type) {
           document.removeEventListener(type, handleStart);
         });

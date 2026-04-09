@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pocket Pic</title>
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #bg-video {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    #tap-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+      cursor: pointer;
+      transition: opacity 1s ease;
+    }
+
+    #tap-overlay span {
+      color: #fff;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: clamp(1rem, 4vw, 2rem);
+      font-weight: 300;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      text-shadow: 0 0 20px rgba(0,0,0,0.5);
+      user-select: none;
+    }
+
+    #tap-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <video id="bg-video" autoplay muted loop playsinline>
+    <source src="Irenas-pocket.mp4" type="video/mp4">
+  </video>
+
+  <div id="tap-overlay">
+    <span>Tap to Start</span>
+  </div>
+
+  <script>
+    (function () {
+      const CROSSFADE_DURATION = 9; // seconds
+      const AUDIO_SRC = 'MidnightHarpt.m4a';
+
+      const overlay = document.getElementById('tap-overlay');
+      let started = false;
+
+      // ── Audio crossfader ──────────────────────────────────────────────────
+      let audioCtx = null;
+      let audioBuffer = null;
+      let activeSource = null;
+      let activeGain = null;
+      let trackDuration = 0;
+      let crossfadeTimer = null;
+
+      function createSource() {
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.loop = false;
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+
+        source.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        return { source, gain };
+      }
+
+      function fadeIn(gain, duration) {
+        const now = audioCtx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(1, now + duration);
+      }
+
+      function fadeOut(gain, duration) {
+        const now = audioCtx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(0, now + duration);
+      }
+
+      function startLoop() {
+        const { source, gain } = createSource();
+        fadeIn(gain, CROSSFADE_DURATION);
+        source.start(audioCtx.currentTime);
+
+        activeSource = source;
+        activeGain = gain;
+
+        // Schedule next crossfade to begin CROSSFADE_DURATION seconds before track ends
+        const crossfadeStart = trackDuration - CROSSFADE_DURATION;
+        const delay = Math.max(0, crossfadeStart) * 1000;
+
+        crossfadeTimer = setTimeout(crossfade, delay);
+      }
+
+      function crossfade() {
+        // Fade out the current source
+        fadeOut(activeGain, CROSSFADE_DURATION);
+
+        const oldSource = activeSource;
+        const oldGain = activeGain;
+
+        // Start new source immediately and fade it in
+        const { source: newSource, gain: newGain } = createSource();
+        fadeIn(newGain, CROSSFADE_DURATION);
+        newSource.start(audioCtx.currentTime);
+
+        activeSource = newSource;
+        activeGain = newGain;
+
+        // Clean up old source after fade completes
+        setTimeout(function () {
+          try { oldSource.stop(); } catch (e) {}
+          oldGain.disconnect();
+        }, CROSSFADE_DURATION * 1000 + 200);
+
+        // Schedule the next crossfade
+        const delay = Math.max(0, trackDuration - CROSSFADE_DURATION) * 1000;
+        crossfadeTimer = setTimeout(crossfade, delay);
+      }
+
+      async function initAudio() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const response = await fetch(AUDIO_SRC);
+        const arrayBuffer = await response.arrayBuffer();
+        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        trackDuration = audioBuffer.duration;
+
+        startLoop();
+      }
+
+      // ── Start on first interaction ────────────────────────────────────────
+      function handleStart(e) {
+        if (started) return;
+        started = true;
+
+        overlay.classList.add('hidden');
+
+        initAudio().catch(function (err) {
+          console.error('Audio init failed:', err);
+        });
+
+        // Remove all listeners once started
+        ['click', 'touchstart', 'keydown'].forEach(function (type) {
+          document.removeEventListener(type, handleStart);
+        });
+      }
+
+      ['click', 'touchstart', 'keydown'].forEach(function (type) {
+        document.addEventListener(type, handleStart, { passive: true });
+      });
+    })();
+  </script>
+
+</body>
+</html>

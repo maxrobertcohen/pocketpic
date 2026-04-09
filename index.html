@@ -58,17 +58,7 @@
       pointer-events: none;
     }
 
-    #debug {
-      position: fixed;
-      bottom: 10px;
-      left: 10px;
-      right: 10px;
-      color: #fff;
-      font-family: monospace;
-      font-size: 12px;
-      z-index: 10;
-      word-break: break-all;
-    }
+
   </style>
 </head>
 <body>
@@ -81,30 +71,21 @@
     <span>Tap to Start</span>
   </div>
 
-  <div id="debug"></div>
-
   <script>
     (function () {
       const CROSSFADE_DURATION = 9; // seconds
       const AUDIO_SRC = 'MidnightHarpt.m4a';
 
       const overlay = document.getElementById('tap-overlay');
-      const dbg = document.getElementById('debug');
       let started = false;
       let tracks = null;
       let current = 0;
       let fadeTimer = null;
       let fadeInterval = null;
 
-      function log(msg) {
-        dbg.textContent = msg;
-        console.log(msg);
-      }
-
       function scheduleNextCrossfade() {
         var track = tracks[current];
         var delay = (track.duration - CROSSFADE_DURATION - track.currentTime) * 1000;
-        log('playing OK — duration ' + track.duration.toFixed(1) + 's, crossfade in ' + (delay/1000).toFixed(1) + 's');
         clearTimeout(fadeTimer);
         fadeTimer = setTimeout(doCrossfade, Math.max(0, delay));
       }
@@ -116,7 +97,7 @@
 
         inTrack.volume = 0;
         inTrack.currentTime = 0;
-        inTrack.play().catch(function(e) { log('crossfade play error: ' + e); });
+        inTrack.play().catch(function(e) { console.error('crossfade play error:', e); });
 
         var startTime = Date.now();
         clearInterval(fadeInterval);
@@ -139,27 +120,15 @@
         if (started) return;
         started = true;
 
-        // Create audio elements here, inside the gesture handler
         tracks = [new Audio(AUDIO_SRC), new Audio(AUDIO_SRC)];
 
         overlay.classList.add('hidden');
-        log('tapped — calling play()');
 
         var track = tracks[current];
         track.volume = 1;
-        var p = track.play();
-        if (p && p.then) {
-          p.then(function() {
-            log('play() resolved');
-          }).catch(function (e) {
-            log('play() rejected: ' + e);
-          });
-        }
+        track.play().catch(function(e) { console.error('play error:', e); });
 
         track.addEventListener('loadedmetadata', scheduleNextCrossfade, { once: true });
-        track.addEventListener('error', function(e) {
-          log('audio error: ' + (track.error ? track.error.code + ' ' + track.error.message : e));
-        });
 
         ['click', 'touchstart', 'keydown'].forEach(function (type) {
           document.removeEventListener(type, handleStart);
